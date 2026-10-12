@@ -4,6 +4,8 @@
 
 ## Operation
 
+This is for the Booktoki novel chapter-list and text-viewer structure tested at sbxh9.com. It is not a universal downloader. Comic and image-based chapters are unsupported. Other novel websites are unverified; domain or viewer changes require another compatibility check.
+
 This site serves static HTML, CSS, and JavaScript. Saving runs in each computer's browser; novel bodies and authentication data are not uploaded to this installer. Progress is stored per computer. To move progress, export a recovery backup, transfer the file, import it on the new computer, then run Save All to skip already saved chapters.
 
 CAPTCHAs require manual authentication. Saving resumes once chapter text becomes visible.
