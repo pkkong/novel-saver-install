@@ -1,6 +1,6 @@
 # Novel Saver web installer
 
-[Install page](https://pkkong.github.io/novel-saver-install/) is a public GitHub Pages site. Open it in desktop Chrome and drag the Novel Saver 2.1.1 link onto the bookmarks bar. The page also includes manual copy instructions.
+[Install page](https://pkkong.github.io/novel-saver-install/) is a public GitHub Pages site. Open it in desktop Chrome and drag the Novel Saver 2.2.0 link onto the bookmarks bar. The page also includes manual copy instructions.
 
 ## Operation
 
@@ -17,3 +17,5 @@ GitHub Pages publishes the main branch root (/). .nojekyll preserves the static 
 ## Attribution and license
 
 Initial references: nolepguy/novel-dl and yeorinhieut/novel-dl. See NOTICE.md for attribution and LICENSE.txt for the AGPL-3.0 license.
+
+Version 2.2.0 adds progress/ETA, immediate pause, a minimized launcher, and direct cached TXT export. Existing bookmarks must be replaced manually.

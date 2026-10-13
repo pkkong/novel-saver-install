@@ -1,7 +1,7 @@
 /* Browser bookmarklet. Reads the normal rendered viewer; no external libraries. */
 (() => {
   "use strict";
-  const VERSION = "2.1.1";
+  const VERSION = "2.2.0";
   if (window.novelDL) {
     window.novelDL.show();
     if (window.novelDL.version !== VERSION) alert("이전 버전이 실행 중입니다. 부분 본문을 내보낸 뒤 새로고침하고 보완판을 실행하세요.");
@@ -12,48 +12,75 @@
   const novelId = match[1], origin = location.origin, readerName = `novel-dl-reader-${novelId}`;
   if (match[2]) {
     window.name = readerName;
-    alert("이 회차 탭을 저장 작업에 연결했습니다. 작품 목록 탭에서 북마크를 실행하고 ‘이어서 계속’을 누르세요.");
+    alert("이 회차 탭을 저장 작업에 연결했습니다. 작품 목록 탭에서 북마크를 실행하고 ‘이어서 저장’을 누르세요.");
     return;
+  }
+  if (!document.querySelector(`ul[data-novel-id="${novelId}"]`) || !document.querySelector(".novel-episode-head")) {
+    alert("지원하는 소설 회차 목록을 찾지 못했습니다. 북토끼의 소설 목록에서 실행하세요. 화면 구조가 바뀌었으면 호환성 확인이 필요합니다."); return;
   }
   const visibleHeading = doc => [...doc.querySelectorAll("h1")].find(el => el.getClientRects().length && doc.defaultView.getComputedStyle(el).visibility !== "hidden");
   const title = visibleHeading(document)?.innerText.trim() || `novel-${novelId}`;
   const saved = new Map(), catalog = new Map();
-  let db, job = null, busy = false, cancelled = false, ready = false, reader, wake = null;
-  const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+  let db, job = null, busy = false, cancelled = false, ready = false, reader, wake = null, waitWake = null, renderTimer = null;
+  const metrics = { started: 0, paused: 0, pauseStarted: 0, samples: [], remaining: 0, nextAt: 0 };
+  // Interrupt waits immediately when the user pauses; never accelerate site requests.
+  const sleep = ms => new Promise(resolve => {
+    const finish = () => { clearTimeout(timer); waitWake = null; resolve(); };
+    const timer = setTimeout(finish, ms); waitWake = finish;
+    if (cancelled) finish();
+  });
   const now = () => new Date().toISOString();
   const error = (code, message) => Object.assign(new Error(message), { code });
   const checkCancelled = () => { if (cancelled) throw error("STOPPED", "사용자가 중지했습니다."); };
   const panel = document.createElement("section");
   panel.id = "novel-dl-panel";
-  Object.assign(panel.style, { position: "fixed", top: "12px", right: "12px", zIndex: "2147483647", width: "360px", maxWidth: "90vw", maxHeight: "85vh", overflow: "auto", padding: "16px", borderRadius: "10px", background: "#fff", color: "#222", boxShadow: "0 4px 30px #0005", font: "14px/1.5 sans-serif", border: "1px solid #aaa" });
-  panel.innerHTML = `<strong>소설 저장 · 2.1</strong><div data-title></div>
-    <p style="margin:8px 0">전체 저장을 누르면 완료한 회차는 건너뜁니다.<br>인증이 필요하면 회차 탭에서 직접 해결하세요. 본문이 표시되면 자동으로 이어집니다.</p>
-    <button data-all disabled style="width:100%;padding:12px;background:#176b54;color:white;border:0;border-radius:6px;font-weight:bold;font-size:16px">전체 저장</button>
-    <div style="display:flex;flex-wrap:wrap;gap:6px;margin:10px 0">
-      <button data-continue disabled>이어서 계속</button>
-      <button data-stop disabled>중지</button><button data-export disabled>저장된 본문 내보내기</button>
-      <button data-close>접기</button>
-    </div><progress data-progress max="1" value="0" style="width:100%" aria-label="회차 진행"></progress>
-    <div data-count></div><div data-status role="status" style="white-space:pre-wrap"></div>
-    <details style="margin-top:10px"><summary>일부 회차·백업·검증</summary>
-      <label>시작 회차 <input data-start type="number" min="1" value="1" style="width:70px"></label>
-      <label>끝 회차 <input data-end type="number" min="1" value="3" style="width:70px"></label>
-      <div style="display:flex;flex-wrap:wrap;gap:6px;margin:8px 0">
-      <button data-run disabled>선택 회차 저장</button>
-      <button data-report disabled>실행 기록 JSON</button><button data-verify disabled>본문 검증 JSON</button>
-      <button data-list disabled>회차 목록 JSON</button><button data-backup disabled>복구 백업 저장</button>
-      <label>복구 백업 가져오기 <input data-import type="file" accept=".json,application/json" disabled style="max-width:210px"></label>
-      </div>
-    </details>
-    <details><summary>대기 설정</summary>
-      <label>회차 간 대기(초) <input data-delay type="number" min="2" max="60" value="8" style="width:60px"></label><br>
-      <label>본문 대기(초) <input data-timeout type="number" min="5" max="180" value="60" style="width:60px"></label><br>
-      <label>로딩 재시도 <input data-retries type="number" min="0" max="2" value="2" style="width:60px"></label>
-    </details>`;
+  Object.assign(panel.style, { position: "fixed", top: "16px", right: "16px", zIndex: "2147483647", width: "390px", maxWidth: "calc(100vw - 32px)", maxHeight: "calc(100vh - 32px)", overflow: "auto", padding: "22px", borderRadius: "18px", background: "#fafcf9", color: "#243c33", boxShadow: "0 12px 48px #173d3329", font: '14px/1.6 Arial,"Apple SD Gothic Neo","Malgun Gothic",sans-serif', border: "1px solid #dce6dc", boxSizing: "border-box" });
+  panel.setAttribute("aria-label", "소설 저장 작업");
+  panel.innerHTML = `<style>
+    #novel-dl-panel *{box-sizing:border-box}#novel-dl-panel [hidden],#novel-dl-launcher[hidden]{display:none!important}
+    #novel-dl-panel button{all:unset;box-sizing:border-box;cursor:pointer;border:1px solid #d6e2d8;border-radius:8px;padding:8px 12px;background:#fff;color:#335b48;font:inherit;font-size:13px;text-align:center;line-height:1.5}
+    #novel-dl-panel button:hover{background:#edf3ec}#novel-dl-panel button:disabled{opacity:.5;cursor:default}#novel-dl-panel button:focus-visible,#novel-dl-panel summary:focus-visible,#novel-dl-panel input:focus-visible{outline:3px solid #9cb989;outline-offset:3px}
+    #novel-dl-panel .nd-header,#novel-dl-panel .nd-progress-head{display:flex;justify-content:space-between;align-items:center;gap:12px}
+    #novel-dl-panel .nd-brand{font-size:13px;color:#607965;font-weight:700}#novel-dl-panel [data-close]{padding:4px 9px;font-size:12px;background:transparent}
+    #novel-dl-panel [data-title]{font-size:23px;font-weight:700;line-height:1.4;letter-spacing:-.7px;margin:16px 0 5px;overflow-wrap:anywhere}#novel-dl-panel .nd-subtitle{font-size:12px;color:#718371;margin-bottom:18px}
+    #novel-dl-panel .nd-stage{font-size:12px;color:#42694a;border-radius:20px;background:#eaf1e5;padding:4px 10px}#novel-dl-panel[data-state=paused] .nd-stage{color:#835e1c;background:#fff0d2}#novel-dl-panel[data-state=failed] .nd-stage{color:#984334;background:#fae9e4}
+    #novel-dl-panel [data-percent]{font-size:24px;line-height:1;font-weight:700}#novel-dl-panel progress{display:block;width:100%;height:8px;accent-color:#246b50;border:0;border-radius:8px;margin:14px 0 8px}#novel-dl-panel progress::-webkit-progress-bar{background:#e3eadf;border-radius:8px}#novel-dl-panel progress::-webkit-progress-value{background:#246b50;border-radius:8px}
+    #novel-dl-panel [data-count]{font-size:12px;color:#657a65}#novel-dl-panel [data-timing]{font-size:12px;color:#738674;margin:6px 0 16px;min-height:19px}
+    #novel-dl-panel [data-all]{display:block;width:100%;background:#1d5e45;color:#fff;border-color:#1d5e45;padding:13px;font-size:16px;font-weight:700}#novel-dl-panel [data-all]:hover:enabled{background:#287153}
+    #novel-dl-panel .nd-actions{display:flex;gap:7px;flex-wrap:wrap;margin:9px 0 16px}#novel-dl-panel .nd-actions button{flex:1;white-space:nowrap}
+    #novel-dl-panel [data-status]{background:#eef3eb;border-radius:9px;padding:12px;font-size:12px;color:#49614b;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.8}#novel-dl-panel [data-status]:empty{display:none}
+    #novel-dl-panel .nd-help{margin:12px 0 16px;color:#7a8976;font-size:11px;line-height:1.8}
+    #novel-dl-panel details{border-top:1px solid #e0e8dc;margin-top:12px;padding-top:12px}#novel-dl-panel summary{font-size:13px;color:#54704e;cursor:pointer;padding:3px 0}#novel-dl-panel label{display:block;font-size:12px;color:#5e755b;margin:10px 0}
+    #novel-dl-panel input{font:inherit;font-size:12px;border:1px solid #ceddca;border-radius:6px;background:white;color:#2f5039;padding:6px;width:80px;margin-left:8px}#novel-dl-panel input[type=file]{display:block;width:100%;margin:6px 0}#novel-dl-panel .nd-tools{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}#novel-dl-panel .nd-tools button{font-size:12px}
+    @media(prefers-reduced-motion:no-preference){#novel-dl-panel progress::-webkit-progress-value{transition:width .2s}}
+  </style><div class="nd-header"><span class="nd-brand">소설 저장</span><button data-close aria-label="저장 패널 접기">접기 ↘</button></div>
+    <div data-title></div><div class="nd-subtitle">한 번 시작하면 자동 저장 · 완료 후 합본 TXT</div>
+    <div class="nd-progress-head"><span class="nd-stage" data-stage>준비 중</span><span data-percent>0%</span></div>
+    <progress data-progress max="1" value="0" aria-label="회차 진행"></progress><div data-count></div><div data-timing></div>
+    <button data-all disabled>전체 저장</button><div class="nd-actions"><button data-stop disabled>일시정지</button><button data-export disabled>TXT 받기</button></div>
+    <div class="nd-actions"><button data-reader hidden>회차 탭 보기 ↗</button><button data-continue disabled hidden>확인 후 계속</button></div>
+    <div data-status role="status" aria-live="polite"></div><p class="nd-help">브라우저와 회차 탭을 열어 두세요. 인증이 나오면 회차 탭에서 직접 해결하며, 본문이 표시되면 자동으로 이어집니다.</p>
+    <details><summary>저장 범위·백업</summary><label>시작 회차 <input data-start type="number" min="1" value="1"></label><label>끝 회차 <input data-end type="number" min="1" value="3"></label>
+      <div class="nd-tools"><button data-run disabled>선택 회차 저장</button><button data-backup disabled>복구 백업 저장</button></div><label>복구 백업 가져오기 <input data-import type="file" accept=".json,application/json" disabled></label></details>
+    <details><summary>대기 설정·진단</summary><label>회차 간 대기(초) <input data-delay type="number" min="2" max="60" value="8"></label><label>본문 대기(초) <input data-timeout type="number" min="5" max="180" value="60"></label><label>로딩 재시도 <input data-retries type="number" min="0" max="2" value="2"></label>
+      <div class="nd-tools"><button data-report disabled>실행 기록 JSON</button><button data-verify disabled>본문 검증 JSON</button><button data-list disabled>회차 목록 JSON</button></div></details>`;
   document.body.appendChild(panel);
   const ui = selector => panel.querySelector(selector);
+  ui(".nd-brand").textContent = `소설 저장 · ${VERSION}`;
+  const launcher = document.createElement("button");
+  launcher.id = "novel-dl-launcher"; launcher.hidden = true; launcher.setAttribute("aria-label", "저장 패널 다시 열기");
+  Object.assign(launcher.style, { position: "fixed", bottom: "20px", right: "20px", zIndex: "2147483647", background: "#1d5e45", color: "white", border: "0", borderRadius: "30px", padding: "12px 18px", cursor: "pointer", font: "bold 13px/1.5 sans-serif", boxShadow: "0 5px 22px #173d3330" });
+  document.body.appendChild(launcher);
+  const show = () => { panel.style.display = "block"; launcher.hidden = true; };
+  launcher.onclick = show;
   ui("[data-title]").textContent = title;
   const status = text => { ui("[data-status]").textContent = text; };
+  const fullCount = () => Number(document.querySelector(".novel-episode-head")?.innerText.match(/(\d+)\s*화/)?.[1]) || 0;
+  const formatDuration = ms => { const seconds = Math.max(0, Math.round(ms / 1000)); return seconds < 60 ? `${seconds}초` : seconds < 3600 ? `${Math.floor(seconds / 60)}분 ${seconds % 60}초` : `${Math.floor(seconds / 3600)}시간 ${Math.floor(seconds % 3600 / 60)}분`; };
+  const isCachedRange = range => {
+    for (let n = range.start; n <= range.end; n++) if (!saved.has(n)) return false;
+    return true;
+  };
   function controls() {
     for (const selector of ["[data-all]", "[data-run]", "[data-verify]", "[data-list]", "[data-import]", "[data-start]", "[data-end]", "[data-delay]", "[data-timeout]", "[data-retries]"]) ui(selector).disabled = !ready || busy;
     ui("[data-continue]").disabled = !ready || (busy ? !wake : !job || job.state === "complete");
@@ -61,10 +88,32 @@
     ui("[data-export]").disabled = !ready || !saved.size;
     ui("[data-backup]").disabled = !ready || busy;
     ui("[data-report]").disabled = !ready || !job;
-    const total = job ? job.range.end - job.range.start + 1 : 0;
+    const fullTotal = fullCount(), allCached = fullTotal > 0 && isCachedRange({ start: 1, end: fullTotal });
+    const total = job ? job.range.end - job.range.start + 1 : fullTotal;
+    const completed = job ? job.successes.length : Math.min(saved.size, total);
     ui("[data-progress]").max = total || 1;
-    ui("[data-progress]").value = job?.successes.length || 0;
-    ui("[data-count]").textContent = `범위 완료 ${job?.successes.length || 0}/${total} · 본문 보관 ${saved.size}개`;
+    ui("[data-progress]").value = completed;
+    ui("[data-count]").textContent = `범위 완료 ${completed}/${total} · 본문 보관 ${saved.size}개`;
+    const percent = total ? Math.round((completed / total) * 100) : 0;
+    ui("[data-percent]").textContent = `${percent}%`;
+    panel.dataset.state = job?.state || "ready";
+    ui("[data-stage]").textContent = !ready ? "준비 중" : busy ? wake ? "확인 필요" : "자동 저장 중" : job?.state === "complete" ? "완료" : job?.state === "failed" ? "확인 필요" : job?.state === "paused" ? "일시정지" : allCached ? "보관 완료" : "준비 완료";
+    ui("[data-all]").textContent = busy ? wake ? "확인 대기 중" : "자동 저장 중…" : allCached ? "합본 TXT 다시 받기" : job && job.mode === "download" && job.state !== "complete" ? "이어서 저장" : saved.size ? "남은 회차 저장" : `전체 ${fullCount() || ""}화 저장`;
+    ui("[data-stop]").hidden = !busy;
+    ui("[data-export]").hidden = !saved.size || allCached;
+    ui("[data-stop]").parentElement.hidden = !busy && (!saved.size || allCached);
+    ui("[data-reader]").hidden = !busy || !reader || reader.closed;
+    ui("[data-continue]").hidden = busy ? !wake || ["CAPTCHA", "ACCESS"].includes(job?.pauseReason?.code) : !job || job.mode !== "verify" || job.state === "complete";
+    ui("[data-continue]").textContent = busy ? "확인 후 계속" : "검증 이어서 하기";
+    launcher.textContent = `소설 저장 · ${ui("[data-stage]").textContent}${total ? ` ${percent}%` : ""}`;
+    if (busy && metrics.started) {
+      const elapsed = performance.now() - metrics.started - metrics.paused - (metrics.pauseStarted ? performance.now() - metrics.pauseStarted : 0);
+      const remaining = metrics.remaining;
+      const average = metrics.samples.length ? metrics.samples.reduce((a, b) => a + b, 0) / metrics.samples.length : 0;
+      const estimate = remaining && metrics.samples.length >= 2 ? ` · 남은 시간 약 ${formatDuration(remaining * (average + (job?.settings.delay || 0)) - (job?.settings.delay || 0))}` : remaining ? " · 예상 시간 측정 중" : "";
+      const cooldown = metrics.nextAt > performance.now() ? ` · 다음 회차 ${Math.ceil((metrics.nextAt - performance.now()) / 1000)}초 후` : "";
+      ui("[data-timing]").textContent = `실행 ${formatDuration(elapsed)}${wake ? " · 사용자 확인 대기" : estimate + cooldown}`;
+    } else ui("[data-timing]").textContent = allCached ? "보관한 본문으로 바로 만듭니다. 회차를 다시 열지 않습니다." : "저장한 회차는 건너뜁니다. 복사·붙여넣기는 필요하지 않습니다.";
   }
   function download(name, content, type) {
     const url = URL.createObjectURL(new Blob(["\ufeff", content], { type }));
@@ -130,8 +179,11 @@
     const data = await load();
     saved.clear(); catalog.clear();
     let invalid = 0;
-    for (const ep of data.chapters) {
-      if (await validChapter(ep)) saved.set(ep.number, ep); else invalid++;
+    // Validate in bounded batches; retain the same per-body SHA-256 checks.
+    for (let i = 0; i < data.chapters.length; i += 16) {
+      const batch = data.chapters.slice(i, i + 16);
+      const valid = await Promise.all(batch.map(validChapter));
+      batch.forEach((ep, index) => { if (valid[index]) saved.set(ep.number, ep); else invalid++; });
     }
     for (const ep of data.work?.catalog || []) if (Number.isSafeInteger(ep.number) && ep.number > 0 && validURL(ep.url) && typeof ep.title === "string") catalog.set(ep.number, ep);
     const restored = data.work?.schema === 2 ? data.work.job : null;
@@ -231,6 +283,7 @@
     return { kind: "body", text };
   }
   async function pause(reason, ep) {
+    metrics.pauseStarted = performance.now(); metrics.nextAt = 0;
     job.state = "paused"; job.pauseReason = { code: reason.code, message: reason.message, number: ep.number };
     event(reason.code, ep.number, reason.message); await checkpoint();
     let monitor, automatic = false;
@@ -246,6 +299,7 @@
       if (cancelled) resolve();
     });
     clearInterval(monitor);
+    metrics.paused += performance.now() - metrics.pauseStarted; metrics.pauseStarted = 0;
     wake = null; checkCancelled(); job.state = "running"; delete job.pauseReason;
     event(automatic ? "AUTO_RESUMED" : "RESUMED", ep.number); await checkpoint(); controls();
   }
@@ -264,7 +318,7 @@
       while (Date.now() < deadline) {
         checkCancelled();
         if (!reader || reader.closed) {
-          await pause(error("READER", "회차 확인 탭이 닫혔습니다. ‘이어서 계속’을 눌러 다시 여세요."), ep);
+          await pause(error("READER", "회차 확인 탭이 닫혔습니다. ‘확인 후 계속’을 눌러 다시 여세요."), ep);
           reader.location.href = ep.url; deadline = Date.now() + job.settings.timeout; previous = ""; stable = 0; continue;
         }
         let doc;
@@ -330,6 +384,7 @@
   async function execute(action) {
     if (!ready || busy) return;
     busy = true; cancelled = false; controls();
+    renderTimer = setInterval(controls, 1000);
     try { await locked(action); }
     catch (e) {
       if (job && e.code !== "LOCK") {
@@ -339,7 +394,7 @@
         try { await checkpoint(); } catch (storageError) { e = storageError; }
       }
       status(`${e.code === "STOPPED" ? "중지됨" : "중단"}: ${e.message}\n보관한 본문 ${saved.size}개. 저장된 본문과 실행 기록을 내보낼 수 있습니다.`);
-    } finally { busy = false; wake = null; controls(); }
+    } finally { clearInterval(renderTimer); renderTimer = null; busy = false; wake = null; metrics.nextAt = 0; metrics.pauseStarted = 0; controls(); }
   }
   function start(mode, resume = false) {
     if (!ready || busy) return;
@@ -348,35 +403,65 @@
     let config;
     try {
       if (!Number.isSafeInteger(range.start) || !Number.isSafeInteger(range.end) || range.start < 1 || range.end < range.start || range.end - range.start >= 100000 || (total && range.end > total)) throw error("RANGE", "작품 전체 회차 수와 저장 범위를 확인하세요.");
-      config = settings(); ensureReader();
+      config = settings();
+      if (mode !== "download" || !isCachedRange(range)) ensureReader();
     } catch (e) { status(e.message); return; }
     execute(async () => {
+      Object.assign(metrics, { started: performance.now(), paused: 0, pauseStarted: 0, samples: [], remaining: 0, nextAt: 0 });
       await restore();
       if (!resume || !job || job.mode !== mode || job.range.start !== range.start || job.range.end !== range.end) job = { version: VERSION, title, source: location.href, mode, startedAt: now(), range, settings: config, state: "running", successes: [], failures: [], events: [] };
       else { job.settings = config; job.state = "running"; delete job.finishedAt; delete job.pauseReason; event("RESUMED", null, "저장된 진행 기록에서 재개"); }
       ui("[data-start]").value = range.start; ui("[data-end]").value = range.end;
       await checkpoint(); controls();
+      // A fully cached range is already hash-checked by restore(). Export in one
+      // transaction without opening a reader, traversing lists, or saving every body again.
+      if (mode === "download" && isCachedRange(range)) {
+        const items = [], hashes = new Set();
+        for (let n = range.start; n <= range.end; n++) {
+          checkCancelled(); const ep = saved.get(n);
+          if (hashes.has(ep.sha256)) throw error("DUPLICATE", `${n}화 본문이 다른 회차와 동일합니다. 회차 탭을 확인하세요.`);
+          hashes.add(ep.sha256); items.push(ep);
+        }
+        job.successes = items.map(metadata); event("CACHE_EXPORT", null, `${items.length}개 보관 본문으로 합본 생성`);
+        job.state = "complete"; job.finishedAt = now(); delete job.pauseReason;
+        await checkpoint(); controls(); exportItems(items, true);
+        status(`${items.length}개 회차의 합본 TXT를 만들었습니다.\n보관한 본문을 사용해 회차를 다시 요청하지 않았습니다.`); return;
+      }
+      ensureReader();
       const links = (await collect(range.start, range.end)).filter(ep => ep.number >= range.start && ep.number <= range.end);
       if (links.length !== range.end - range.start + 1) throw error("CATALOG", "요청 범위에 빠진 회차가 있습니다.");
       const done = new Map(job.successes.map(ep => [ep.number, ep]));
+      const bodyOwners = new Map(job.successes.map(ep => [ep.sha256, ep.number]));
+      metrics.remaining = links.filter(ep => !done.has(ep.number) && (mode !== "download" || saved.get(ep.number)?.url !== ep.url)).length;
       for (const ep of links) {
         checkCancelled();
         if (done.has(ep.number) && done.get(ep.number).url === ep.url) continue;
         status(`${ep.number}화 확인 중 (${range.start}~${range.end}화)`);
         const cached = mode === "download" ? saved.get(ep.number) : null, usedCache = cached?.url === ep.url;
+        const readStarted = performance.now(), pausedBefore = metrics.paused;
         const result = usedCache ? cached : await readEpisode(ep);
-        if ([...done.values()].some(other => other.number !== ep.number && other.sha256 === result.sha256)) throw error("DUPLICATE", `${ep.number}화 본문이 다른 회차와 동일합니다. 회차 탭을 확인하세요.`);
+        if (bodyOwners.has(result.sha256) && bodyOwners.get(result.sha256) !== ep.number) throw error("DUPLICATE", `${ep.number}화 본문이 다른 회차와 동일합니다. 회차 탭을 확인하세요.`);
         const previous = [...job.successes], previousEventCount = job.events.length, previousCurrent = job.current;
         done.set(ep.number, metadata(result)); job.successes = ordered(done); job.current = ep.number; event(usedCache ? "CACHED" : "SAVED", ep.number);
         try { await checkpoint(mode === "download" ? [result] : []); }
         catch (e) { job.successes = previous; job.events.length = previousEventCount; job.current = previousCurrent; done.delete(ep.number); throw e; }
         if (mode === "download") saved.set(ep.number, result);
-        controls(); if (!usedCache && ep.number !== range.end) await sleep(config.delay);
+        bodyOwners.set(result.sha256, ep.number);
+        if (!usedCache) {
+          metrics.samples.push(performance.now() - readStarted - (metrics.paused - pausedBefore));
+          if (metrics.samples.length > 10) metrics.samples.shift();
+          metrics.remaining--;
+        }
+        controls();
+        if (!usedCache && metrics.remaining > 0) {
+          metrics.nextAt = performance.now() + config.delay; controls();
+          await sleep(config.delay); metrics.nextAt = 0;
+        }
       }
       checkCancelled(); job.state = "complete"; job.finishedAt = now(); delete job.pauseReason; await checkpoint(); controls();
       if (mode === "download") exportItems(links.map(ep => saved.get(ep.number)), true);
       else jsonDownload(`${title}_${range.start}-${range.end}화_본문검증.json`, job);
-      status(`${job.successes.length}개 회차 ${mode === "download" ? "저장" : "검증"} 완료.\n본문과 진행 기록은 브라우저에 보관돼 있습니다. 실행 기록 JSON을 내보낼 수 있습니다.`);
+      status(mode === "download" ? `${job.successes.length}개 회차 저장 완료.\n합본 TXT 다운로드를 시작했습니다. 파일이 보이지 않으면 저장 버튼으로 다시 받을 수 있습니다.` : `${job.successes.length}개 회차 검증 완료. 검증 기록 JSON 다운로드를 시작했습니다.`);
     });
   }
   async function backup() {
@@ -407,6 +492,10 @@
   }
   const handle = action => async () => { try { await action(); } catch (e) { status(e.message); } controls(); };
   ui("[data-all]").onclick = () => {
+    if (job && job.mode === "download" && job.state !== "complete" && !isCachedRange({ start: 1, end: fullCount() })) {
+      ui("[data-start]").value = job.range.start; ui("[data-end]").value = job.range.end;
+      start("download", true); return;
+    }
     const total = Number(document.querySelector(".novel-episode-head")?.innerText.match(/(\d+)\s*화/)?.[1]);
     if (!Number.isSafeInteger(total) || total < 1) { status("전체 회차 수를 확인하지 못했습니다. 회차 목록을 확인하세요."); return; }
     ui("[data-start]").value = 1; ui("[data-end]").value = total;
@@ -417,7 +506,7 @@
   ui("[data-continue]").onclick = () => {
     try { if (wake) { ensureReader(); const resume = wake; wake = null; resume(); controls(); } else if (job) start(job.mode, true); } catch (e) { status(e.message); }
   };
-  const stop = () => { cancelled = true; if (wake) wake(); status("중지 요청을 처리하고 있습니다."); };
+  const stop = () => { cancelled = true; if (wake) wake(); if (waitWake) waitWake(); status("일시정지 요청 중… 저장한 본문은 유지됩니다."); };
   ui("[data-stop]").onclick = stop;
   ui("[data-export]").onclick = handle(async () => exportItems(ordered(saved)));
   ui("[data-report]").onclick = handle(async () => { if (!job) throw error("EMPTY", "실행 기록이 없습니다."); jsonDownload(`${title}_실행기록.json`, job); });
@@ -429,13 +518,15 @@
     try { await locked(async () => { await restore(); await importBackup(file); }); }
     finally { busy = false; ui("[data-import]").value = ""; }
   });
-  ui("[data-close]").onclick = () => { panel.style.display = "none"; };
-  window.novelDL = { version: VERSION, show: () => { panel.style.display = "block"; }, stop };
+  ui("[data-reader]").onclick = () => { try { ensureReader(); reader.focus(); } catch (e) { status(e.message); } };
+  ui("[data-close]").onclick = () => { panel.style.display = "none"; launcher.hidden = false; };
+  window.novelDL = { version: VERSION, show, stop };
   status("저장된 진행 상태를 복원하고 있습니다…"); controls();
   (async () => {
     try {
       db = await openDB(); const invalid = await restore(); ready = true; controls();
-      status(`${saved.size}개 본문 복원 완료.${job && job.state !== "complete" ? " ‘이어서 계속’으로 중단된 범위를 재개할 수 있습니다." : " ‘전체 저장’을 누르면 시작합니다."}${invalid ? `\n검증되지 않은 저장 기록 ${invalid}개는 재사용하지 않습니다.` : ""}`);
+      const allCached = fullCount() > 0 && isCachedRange({ start: 1, end: fullCount() });
+      status(`${saved.size}개 본문 복원 완료.${allCached ? " ‘합본 TXT 다시 받기’로 파일을 받을 수 있습니다." : job && job.state !== "complete" ? " ‘이어서 저장’으로 중단된 범위를 재개할 수 있습니다." : " 큰 저장 버튼을 한 번 누르면 시작합니다."}${invalid ? `\n검증되지 않은 저장 기록 ${invalid}개는 재사용하지 않습니다.` : ""}`);
     } catch (e) { status(e.message); }
   })();
 })();
