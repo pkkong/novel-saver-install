@@ -19,3 +19,5 @@ GitHub Pages publishes the main branch root (/). .nojekyll preserves the static 
 Initial references: nolepguy/novel-dl and yeorinhieut/novel-dl. See NOTICE.md for attribution and LICENSE.txt for the AGPL-3.0 license.
 
 Version 2.2.0 adds progress/ETA, immediate pause, a minimized launcher, and direct cached TXT export. Existing bookmarks must be replaced manually.
+
+The installer uses self-hosted Pretendard Variable v1.3.9 dynamic subsets from https://github.com/orioncactus/pretendard. Font files are unmodified and licensed under SIL OFL 1.1; see assets/fonts/pretendard/LICENSE.txt. Only subsets needed for rendered characters are requested.
