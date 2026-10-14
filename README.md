@@ -1,6 +1,6 @@
 # Novel Saver web installer
 
-[Install page](https://pkkong.github.io/novel-saver-install/) is a public GitHub Pages site. Open it in desktop Chrome and drag the Novel Saver 2.2.0 link onto the bookmarks bar. The page also includes manual copy instructions.
+[Install page](https://pkkong.github.io/novel-saver-install/) is a public GitHub Pages site. Open it in desktop Chrome and drag the 소설 저장 link onto the bookmarks bar. The page also includes manual copy instructions.
 
 ## Operation
 
@@ -21,3 +21,5 @@ Initial references: nolepguy/novel-dl and yeorinhieut/novel-dl. See NOTICE.md fo
 Version 2.2.0 adds progress/ETA, immediate pause, a minimized launcher, and direct cached TXT export. Existing bookmarks must be replaced manually.
 
 The installer uses self-hosted Pretendard Variable v1.3.9 dynamic subsets from https://github.com/orioncactus/pretendard. Font files are unmodified and licensed under SIL OFL 1.1; see assets/fonts/pretendard/LICENSE.txt. Only subsets needed for rendered characters are requested.
+
+The installer separates bookmark setup from saving instructions, with a bookmarks-bar illustration and expandable help for manual setup, updates, and moving progress.
