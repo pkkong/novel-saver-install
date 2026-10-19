@@ -23,3 +23,5 @@ Version 2.2.0 adds progress/ETA, immediate pause, a minimized launcher, and dire
 The installer uses self-hosted Pretendard Variable v1.3.9 dynamic subsets from https://github.com/orioncactus/pretendard. Font files are unmodified and licensed under SIL OFL 1.1; see assets/fonts/pretendard/LICENSE.txt. Only subsets needed for rendered characters are requested.
 
 The installer separates bookmark setup from saving instructions, with a bookmarks-bar illustration and expandable help for manual setup, updates, and moving progress.
+
+Version 2.2.1 determines the full save range from the chapter list, including lists numbered 2–251 with a count of 250. Existing bookmarks need to be replaced to receive this fix.

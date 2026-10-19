@@ -1,7 +1,7 @@
 /* Browser bookmarklet. Reads the normal rendered viewer; no external libraries. */
 (() => {
   "use strict";
-  const VERSION = "2.2.0";
+  const VERSION = "2.2.1";
   if (window.novelDL) {
     window.novelDL.show();
     if (window.novelDL.version !== VERSION) alert("이전 버전이 실행 중입니다. 부분 본문을 내보낸 뒤 새로고침하고 보완판을 실행하세요.");
@@ -59,7 +59,7 @@
     <progress data-progress max="1" value="0" aria-label="회차 진행"></progress><div data-count></div><div data-timing></div>
     <button data-all disabled>전체 저장</button><div class="nd-actions"><button data-stop disabled>일시정지</button><button data-export disabled>TXT 받기</button></div>
     <div class="nd-actions"><button data-reader hidden>회차 탭 보기 ↗</button><button data-continue disabled hidden>확인 후 계속</button></div>
-    <div data-status role="status" aria-live="polite"></div><p class="nd-help">브라우저와 회차 탭을 열어 두세요. 인증이 나오면 회차 탭에서 직접 해결하며, 본문이 표시되면 자동으로 이어집니다.</p>
+    <p data-source-range class="nd-help" hidden></p><div data-status role="status" aria-live="polite"></div><p class="nd-help">브라우저와 회차 탭을 열어 두세요. 인증이 나오면 회차 탭에서 직접 해결하며, 본문이 표시되면 자동으로 이어집니다.</p>
     <details><summary>저장 범위·백업</summary><label>시작 회차 <input data-start type="number" min="1" value="1"></label><label>끝 회차 <input data-end type="number" min="1" value="3"></label>
       <div class="nd-tools"><button data-run disabled>선택 회차 저장</button><button data-backup disabled>복구 백업 저장</button></div><label>복구 백업 가져오기 <input data-import type="file" accept=".json,application/json" disabled></label></details>
     <details><summary>대기 설정·진단</summary><label>회차 간 대기(초) <input data-delay type="number" min="2" max="60" value="8"></label><label>본문 대기(초) <input data-timeout type="number" min="5" max="180" value="60"></label><label>로딩 재시도 <input data-retries type="number" min="0" max="2" value="2"></label>
@@ -75,7 +75,16 @@
   launcher.onclick = show;
   ui("[data-title]").textContent = title;
   const status = text => { ui("[data-status]").textContent = text; };
-  const fullCount = () => Number(document.querySelector(".novel-episode-head")?.innerText.match(/(\d+)\s*화/)?.[1]) || 0;
+  const fullCount = () => Number(document.querySelector(".novel-episode-head")?.innerText.match(/([\d,]+)\s*화/)?.[1]?.replace(/,/g, "")) || 0;
+  // A chapter count is not an episode number: some site lists start at 2.
+  // Only a complete, contiguous catalogue can define the automatic range.
+  const fullRange = () => {
+    const items = ordered(catalog), count = fullCount();
+    if (!count || items.length !== count) return null;
+    const range = { start: items[0].number, end: items.at(-1).number };
+    return range.end - range.start + 1 === items.length ? range : null;
+  };
+  const isFullCached = () => { const range = fullRange(); return !!range && isCachedRange(range); };
   const formatDuration = ms => { const seconds = Math.max(0, Math.round(ms / 1000)); return seconds < 60 ? `${seconds}초` : seconds < 3600 ? `${Math.floor(seconds / 60)}분 ${seconds % 60}초` : `${Math.floor(seconds / 3600)}시간 ${Math.floor(seconds % 3600 / 60)}분`; };
   const isCachedRange = range => {
     for (let n = range.start; n <= range.end; n++) if (!saved.has(n)) return false;
@@ -88,7 +97,10 @@
     ui("[data-export]").disabled = !ready || !saved.size;
     ui("[data-backup]").disabled = !ready || busy;
     ui("[data-report]").disabled = !ready || !job;
-    const fullTotal = fullCount(), allCached = fullTotal > 0 && isCachedRange({ start: 1, end: fullTotal });
+    const fullTotal = fullCount(), allCached = isFullCached();
+    const sourceRange = fullRange();
+    ui("[data-source-range]").hidden = !sourceRange || sourceRange.start === 1;
+    ui("[data-source-range]").textContent = sourceRange ? `사이트 목록: ${sourceRange.start}~${sourceRange.end}화 · ${fullTotal}개. 목록이 ${sourceRange.start}화부터 시작하므로 사이트에 표시된 번호 그대로 저장합니다.` : "";
     const total = job ? job.range.end - job.range.start + 1 : fullTotal;
     const completed = job ? job.successes.length : Math.min(saved.size, total);
     ui("[data-progress]").max = total || 1;
@@ -227,7 +239,7 @@
     return ordered(catalog);
   }
   async function collect(start, end, all = false) {
-    const expected = Number(document.querySelector(".novel-episode-head")?.innerText.match(/(\d+)\s*화/)?.[1]) || null;
+    const expected = fullCount() || null;
     let direction = "older";
     for (let page = 0; page < 200; page++) {
       checkCancelled(); const current = episodes();
@@ -396,21 +408,32 @@
       status(`${e.code === "STOPPED" ? "중지됨" : "중단"}: ${e.message}\n보관한 본문 ${saved.size}개. 저장된 본문과 실행 기록을 내보낼 수 있습니다.`);
     } finally { clearInterval(renderTimer); renderTimer = null; busy = false; wake = null; metrics.nextAt = 0; metrics.pauseStarted = 0; controls(); }
   }
-  function start(mode, resume = false) {
+  function start(mode, resume = false, all = false) {
     if (!ready || busy) return;
-    const range = { start: Number(ui("[data-start]").value), end: Number(ui("[data-end]").value) };
-    const total = Number(document.querySelector(".novel-episode-head")?.innerText.match(/(\d+)\s*화/)?.[1]);
+    let range = all ? fullRange() : { start: Number(ui("[data-start]").value), end: Number(ui("[data-end]").value) };
     let config;
     try {
-      if (!Number.isSafeInteger(range.start) || !Number.isSafeInteger(range.end) || range.start < 1 || range.end < range.start || range.end - range.start >= 100000 || (total && range.end > total)) throw error("RANGE", "작품 전체 회차 수와 저장 범위를 확인하세요.");
+      if (range && (!Number.isSafeInteger(range.start) || !Number.isSafeInteger(range.end) || range.start < 1 || range.end < range.start || range.end - range.start >= 100000)) throw error("RANGE", "작품 전체 회차 수와 저장 범위를 확인하세요.");
       config = settings();
-      if (mode !== "download" || !isCachedRange(range)) ensureReader();
+      if (mode !== "download" || !range || !isCachedRange(range)) ensureReader();
     } catch (e) { status(e.message); return; }
     execute(async () => {
       Object.assign(metrics, { started: performance.now(), paused: 0, pauseStarted: 0, samples: [], remaining: 0, nextAt: 0 });
       await restore();
-      if (!resume || !job || job.mode !== mode || job.range.start !== range.start || job.range.end !== range.end) job = { version: VERSION, title, source: location.href, mode, startedAt: now(), range, settings: config, state: "running", successes: [], failures: [], events: [] };
-      else { job.settings = config; job.state = "running"; delete job.finishedAt; delete job.pauseReason; event("RESUMED", null, "저장된 진행 기록에서 재개"); }
+      if (all) {
+        const known = fullRange();
+        if (known && mode === "download" && isCachedRange(known)) range = known;
+        else {
+          const items = await collect(1, 1, true);
+          range = { start: items[0].number, end: items.at(-1).number };
+          if (range.end - range.start + 1 !== items.length) {
+            const gap = items.findIndex((ep, index) => index > 0 && ep.number !== items[index - 1].number + 1);
+            throw error("CATALOG", `사이트 목록에서 ${items[gap - 1].number + 1}화를 찾지 못했습니다. 빠진 회차를 건너뛰어 완료로 처리하지 않습니다.`);
+          }
+        }
+      }
+      if (!resume || !job || job.mode !== mode || job.range.start !== range.start || job.range.end !== range.end) job = { version: VERSION, title, source: location.href, mode, startedAt: now(), range, scope: all ? "all" : "range", settings: config, state: "running", successes: [], failures: [], events: [] };
+      else { job.scope = all ? "all" : "range"; job.settings = config; job.state = "running"; delete job.finishedAt; delete job.pauseReason; event("RESUMED", null, "저장된 진행 기록에서 재개"); }
       ui("[data-start]").value = range.start; ui("[data-end]").value = range.end;
       await checkpoint(); controls();
       // A fully cached range is already hash-checked by restore(). Export in one
@@ -492,14 +515,15 @@
   }
   const handle = action => async () => { try { await action(); } catch (e) { status(e.message); } controls(); };
   ui("[data-all]").onclick = () => {
-    if (job && job.mode === "download" && job.state !== "complete" && !isCachedRange({ start: 1, end: fullCount() })) {
+    // Legacy full jobs used 1..count. Re-read the catalogue instead of resuming
+    // that invalid range; explicit partial jobs retain the user's selection.
+    const partial = job && job.mode === "download" && job.state !== "complete" && job.scope !== "all" &&
+      !(job.scope == null && job.range.start === 1 && job.range.end === fullCount()) && !isFullCached();
+    if (partial) {
       ui("[data-start]").value = job.range.start; ui("[data-end]").value = job.range.end;
       start("download", true); return;
     }
-    const total = Number(document.querySelector(".novel-episode-head")?.innerText.match(/(\d+)\s*화/)?.[1]);
-    if (!Number.isSafeInteger(total) || total < 1) { status("전체 회차 수를 확인하지 못했습니다. 회차 목록을 확인하세요."); return; }
-    ui("[data-start]").value = 1; ui("[data-end]").value = total;
-    start("download", true);
+    start("download", true, true);
   };
   ui("[data-run]").onclick = () => start("download");
   ui("[data-verify]").onclick = () => start("verify");
@@ -525,7 +549,7 @@
   (async () => {
     try {
       db = await openDB(); const invalid = await restore(); ready = true; controls();
-      const allCached = fullCount() > 0 && isCachedRange({ start: 1, end: fullCount() });
+      const allCached = isFullCached();
       status(`${saved.size}개 본문 복원 완료.${allCached ? " ‘합본 TXT 다시 받기’로 파일을 받을 수 있습니다." : job && job.state !== "complete" ? " ‘이어서 저장’으로 중단된 범위를 재개할 수 있습니다." : " 큰 저장 버튼을 한 번 누르면 시작합니다."}${invalid ? `\n검증되지 않은 저장 기록 ${invalid}개는 재사용하지 않습니다.` : ""}`);
     } catch (e) { status(e.message); }
   })();
