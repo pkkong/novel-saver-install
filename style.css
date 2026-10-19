@@ -54,7 +54,7 @@ h3 { font-size: 18px; line-height: 1.5; letter-spacing: -.3px; margin: 0 0 7px; 
 .os-switch button[aria-pressed=true] { background: white; color: var(--green); font-weight: 700; box-shadow: 0 1px 3px #263c3112; }
 .mobile-note { display: none; }
 .steps { list-style: none; padding: 0; margin: 0; }
-.step { display: grid; grid-template-columns: 34px 1fr; gap: 18px; padding: 25px 0; border-top: 1px solid #e5eadf; }
+.step { display: block; padding: 25px 0; border-top: 1px solid #e5eadf; }
 .step-number { font-size: 13px; font-weight: 700; color: var(--green); background: var(--soft); border-radius: 50%; height: 30px; width: 30px; display: flex; align-items: center; justify-content: center; margin-top: 1px; }
 .step p { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.8; }
 .step strong { color: var(--ink); font-weight: 600; }
@@ -98,7 +98,7 @@ textarea { resize: vertical; overflow-wrap: anywhere; }
 .text-button { border: 0; background: transparent; padding: 7px 0; color: var(--green); text-decoration: underline; text-underline-offset: 4px; font-size: 14px; min-height: 44px; }
 .usage-section { padding: 46px 0 0; scroll-margin-top: 24px; }
 .section-heading .eyebrow { margin-bottom: 6px; }
-.usage-steps { padding: 0; margin: 24px 0 0; list-style: none; display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+.usage-steps { padding: 0; margin: 24px 0 0; list-style: none; display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
 .usage-steps li { border: 1px solid var(--line); background: white; border-radius: 12px; padding: 23px 22px; }
 .usage-steps .step-number { margin-bottom: 16px; }
 .usage-steps h3 { font-size: 16px; }
@@ -149,7 +149,7 @@ textarea { resize: vertical; overflow-wrap: anywhere; }
   h2 { font-size: 24px; }
   .os-choice { align-items: flex-start; }
   .mobile-note { display: block; font-size: 13px; line-height: 1.85; background: var(--soft); border-radius: 7px; padding: 12px; color: var(--muted); margin: 0 0 22px; }
-  .step { grid-template-columns: 25px 1fr; gap: 10px; padding: 22px 0; }
+  .step { padding: 22px 0; }
   .step-number { width: 25px; height: 25px; font-size: 12px; }
   h3 { font-size: 16px; }
   .step p { font-size: 14px; }
@@ -176,4 +176,31 @@ textarea { resize: vertical; overflow-wrap: anywhere; }
 }
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; }
+}
+
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+.choose-section { padding: 0 0 35px; scroll-margin-top: 24px; }
+.choose-steps { list-style: none; padding: 0; margin: 22px 0 0; display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+.choose-steps li { background: white; border: 1px solid var(--line); border-radius: 12px; padding: 25px; }
+.choose-steps .step-number { margin-bottom: 15px; }
+.choose-steps h3 { font-size: 18px; }
+.choose-steps p { margin: 0 0 17px; color: var(--muted); font-size: 14px; }
+.choose-steps .choose-note { font-size: 13px; margin-bottom: 0; }
+.site-link { gap: 18px; text-decoration: none; }
+.next-step-note { margin-top: 18px; padding: 19px 23px; border-left: 3px solid #8da974; background: var(--soft); border-radius: 0 8px 8px 0; font-size: 14px; }
+.next-step-note p { margin: 3px 0 0; color: var(--muted); }
+.install-context, .usage-context { color: var(--muted); font-size: 14px; margin: 0; line-height: 1.85; }
+.skip-setup { margin: 9px 0 23px; }
+.setup-done { background: var(--soft); border-radius: 9px; padding: 17px 20px; margin: 0 0 20px; font-size: 14px; }
+.setup-done strong { display: block; font-weight: 600; }
+.setup-done .inline-link { margin-top: 6px; }
+.usage-context { margin-top: 13px; }
+@media (max-width: 620px) {
+  .choose-section { padding-bottom: 28px; }
+  .choose-steps { grid-template-columns: 1fr; gap: 13px; }
+  .choose-steps li { padding: 22px; }
+  .choose-steps h3 { font-size: 17px; }
+  .choose-section .mobile-note { margin: 18px 0 0; }
+  .next-step-note { padding: 16px 18px; }
+  .setup-done { padding: 16px; }
 }

@@ -25,3 +25,5 @@ The installer uses self-hosted Pretendard Variable v1.3.9 dynamic subsets from h
 The installer separates bookmark setup from saving instructions, with a bookmarks-bar illustration and expandable help for manual setup, updates, and moving progress.
 
 Version 2.2.1 determines the full save range from the chapter list, including lists numbered 2–251 with a count of 250. Existing bookmarks need to be replaced to receive this fix.
+
+The guide follows the reader’s order: open sbxh9.com, choose a novel from the 소설 menu and keep its chapter list open, return here to add the bookmark once, then return to the work’s tab to save. The site links open a separate tab.
